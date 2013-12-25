@@ -1,0 +1,29 @@
+{
+  "name": "qiniu_sync",
+  "version": "0.0.1",
+  "description": "sync tool",
+  "main": "sync.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/javagg/qiniu_sync.git"
+  },
+  "dependencies": {
+    "optimist": "*",
+    "execSync": "*" ,
+    "hashish": "*",
+    "qiniu": "*",
+    "wrench": "*",
+    "mkdirp": "*"
+  },
+  "keywords": [
+    "qiniu"
+  ],
+  "author": "alex lee",
+  "license": "BSD",
+  "bugs": {
+    "url": "https://github.com/javagg/qiniu_sync/issues"
+  }
+}

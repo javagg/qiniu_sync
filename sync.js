@@ -5,13 +5,17 @@ var sh = require('execSync')
 var fs = require('fs')
 var path = require('path')
 var Hash = require('hashish');
+var wrench = require("wrench");
 var qiniu = require('qiniu')
+var download = require('download')
+var url = require('url')
 
 Array.prototype.diff = function(a) {
     return this.filter(function(i) {
         return !(a.indexOf(i) > -1)
     })
 }
+
 Array.prototype._toHash = function() {
     var obj = {}
     for (var i = 0; i < this.length; i++) {
@@ -20,14 +24,50 @@ Array.prototype._toHash = function() {
     return obj
 }
 
-
 var syncDir = argv.syncdir
-qiniu.conf.ACCESS_KEY = 'B3K5BEmyIPWFGjXKI1kfZ1KNt8OJi3SwjyvT6PzB';
-qiniu.conf.SECRET_KEY = '-mE9JUtGpFr90H_3UNh8wWW6cI5aKEwruv2nfgxf';
-
+var pull = argv.pull != undefined
+var keypair = require(argv.keyfile)
+qiniu.conf.ACCESS_KEY = keypair.access_key
+qiniu.conf.SECRET_KEY = keypair.secret_key
 var bucket = argv.bucket
+
+var domain = JSON.parse(sh.exec("/usr/bin/qboxrsctl bucketinfo " + bucket).stdout)["bind_domains"][0]
 var qetag = '/usr/bin/qetag' || argv.qetagpath
 
+function compareStorage(local, remote, pull, callback) {
+    var updates = []
+    var creates = []
+    var deletes = []
+    var noops = []
+
+    var gets = []
+    var puts = []
+
+    function compare(storage1, storage2) {
+        Hash(storage1).forEach(function(item, key) {
+            var remoteItem = storage2[key]
+            if (!remoteItem) {
+                creates.push(key)
+            } else {
+                if (remoteItem.hash !== item.hash) {
+                    updates.push(key)
+                } else {
+                    noops.push(key)
+                }
+            }
+        })
+        deletes = Hash(storage2).keys.diff(Hash(storage1).keys)
+    }
+
+    if (pull) {
+        compare(remote, local)
+        gets = creates.concat(updates)
+    } else {
+        compare(local, remote)
+        puts = creates.concat(updates)
+    }
+    callback(gets, puts, deletes, pull, noops)
+}
 
 function handleList(items) {
     remoteItems = {}
@@ -35,7 +75,6 @@ function handleList(items) {
         remoteItems[item.key] = item
     })
 
-    var wrench = require("wrench");
     var files = wrench.readdirSyncRecursive(syncDir);
     localItems = {}
     files.forEach(function(f) {
@@ -50,65 +89,53 @@ function handleList(items) {
     console.log(remoteItems)
     console.log(localItems)
 
-    var updates = []
-    var creates = []
-    var deletes = []
-    var noops = []
-    Hash(localItems).forEach(function(item, key) {
-        var remoteItem = remoteItems[key]
-        if (!remoteItem) {
-            creates.push(key)
-        } else {
-            if (remoteItem.hash !== item.hash) {
-                updates.push(key)
-            } else {
-                noops.push(key)
-            }
-        }
+    compareStorage(localItems, remoteItems, pull, function(gets, puts, deletes, pull, noops) {
+        console.log("gets:" + gets)
+        console.log("puts:" + puts)
+        console.log("deletes:" + deletes)
+        console.log("noops:" + noops)
+        console.log("pull:" + pull)
+        doFileOps(gets, puts, deletes, pull)
     })
-
-    console.log("updates:" + updates)
-    console.log("noops:" + noops)
-    console.log("creates:" + creates)
-    var gets = []
-    var puts = creates.concat(updates)
-    var deletes = Hash(remoteItems).keys.diff(Hash(localItems).keys)
-    console.log("puts: "+ puts)
-    console.log("deletes: "+ deletes)
-
-    doFileOps(puts, gets, deletes)
 }
 
-function doFileOps(puts, gets, deletes) {
-    var putEntries = puts.map(function(i) {
-        return new qiniu.rs.EntryPath(bucket, i);
-    })
-
-    var getEntries = gets.map(function(i) {
-        return new qiniu.rs.EntryPath(bucket, i);
-    })
+function doFileOps(gets, puts, deletes, pull) {
+//    var putEntries = puts.map(function(i) {
+//        return new qiniu.rs.EntryPath(bucket, i);
+//    })._toHash()
+//
+//    var getEntries = gets.map(function(i) {
+//        return new qiniu.rs.EntryPath(bucket, i);
+//    })._toHash()
 
     var deleteEntries = deletes.map(function(i) {
         return new qiniu.rs.EntryPath(bucket, i);
-    })
+    })._toHash()
 
-    deleteEntries = deleteEntries._toHash()
-    var client = new qiniu.rs.Client();
-    client.batchDelete(deleteEntries, function(err, ret) {
-        if (!err) {
+    // Perform deletes
+//    if (pull) {
+//        Hash(deleteEntries).forEach(function(entry, key) {
+//
+//        })
+//    } else {
+//        var client = new qiniu.rs.Client();
+//        client.batchDelete(deleteEntries, function(err, ret) {
+//            if (!err) {
+//
+//                for (i in ret) {
+//                    if (ret[i].code !== 200) {
+////                    console.log("[delete failed]" + ret[i].data)
+//                    } else {
+//                        console.log("[delete succeed]" + ret[i].data)
+//                    }
+//                }
+//            } else {
+//                console.log(err);
+//            }
+//        });
+//    }
 
-            for (i in ret) {
-                if (ret[i].code !== 200) {
-//                    console.log("[delete failed]" + ret[i].data)
-                } else {
-                    console.log("[delete succeed]" + ret[i].data)
-                }
-            }
-        } else {
-            console.log(err);
-        }
-    });
-
+    // Perform puts
     var extra = new qiniu.io.PutExtra();
     var putPolicy = new qiniu.rs.PutPolicy(bucket);
     puts.forEach(function(key) {
@@ -123,7 +150,27 @@ function doFileOps(puts, gets, deletes) {
             }
         });
     })
+
+    function normalUrl(str) {
+        var o = url.parse(str)
+        var r = o.protocol
+        r += "//"
+        if (o.auth) r += o.auth
+        r += o.host + o.pathname.replace("%2F", "/")
+        return r
+    }
+
+    // Perform gets
+    gets.forEach(function(key) {
+        var baseUrl = qiniu.rs.makeBaseUrl(domain, key);
+        var policy = new qiniu.rs.GetPolicy();
+//        var dlUrl = normalUrl(policy.makeRequest(baseUrl))
+        var dlUrl = normalUrl(baseUrl)
+        var destDir = path.join(syncDir, path.dirname(key))
+        download(dlUrl, destDir)
+    })
 }
+
 
 qiniu.rsf.listPrefix(bucket, null, null, null, function(err, ret) {
     if (!err) {
