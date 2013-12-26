@@ -86,8 +86,8 @@ function handleList(items) {
         localItems[f] = { key: f, hash: hash, fsize: fsize}
     })
 
-    console.log(remoteItems)
-    console.log(localItems)
+//    console.log(remoteItems)
+//    console.log(localItems)
 
     compareStorage(localItems, remoteItems, pull, function(gets, puts, deletes, pull, noops) {
         console.log("gets:" + gets)
@@ -100,40 +100,41 @@ function handleList(items) {
 }
 
 function doFileOps(gets, puts, deletes, pull) {
-//    var putEntries = puts.map(function(i) {
-//        return new qiniu.rs.EntryPath(bucket, i);
-//    })._toHash()
-//
-//    var getEntries = gets.map(function(i) {
-//        return new qiniu.rs.EntryPath(bucket, i);
-//    })._toHash()
-
-    var deleteEntries = deletes.map(function(i) {
-        return new qiniu.rs.EntryPath(bucket, i);
-    })._toHash()
-
     // Perform deletes
-//    if (pull) {
-//        Hash(deleteEntries).forEach(function(entry, key) {
-//
-//        })
-//    } else {
-//        var client = new qiniu.rs.Client();
-//        client.batchDelete(deleteEntries, function(err, ret) {
-//            if (!err) {
-//
-//                for (i in ret) {
-//                    if (ret[i].code !== 200) {
-////                    console.log("[delete failed]" + ret[i].data)
-//                    } else {
-//                        console.log("[delete succeed]" + ret[i].data)
-//                    }
-//                }
-//            } else {
-//                console.log(err);
-//            }
-//        });
-//    }
+    if (pull) {
+        deletes.forEach(function(key) {
+            key = path.normalize(key)
+            var dirs = [key]
+            var p = path.dirname(key)
+            while ((p != '.') && (p != '/')) {
+                dirs.push(p)
+                p = path.dirname(p)
+            }
+//            dirs.forEach(function(dir) {
+//                fs.unlinkSync(dir)
+//            })
+        })
+    } else {
+        var deleteEntries = deletes.map(function(i) {
+            return new qiniu.rs.EntryPath(bucket, i);
+        })._toHash()
+
+        var client = new qiniu.rs.Client();
+        client.batchDelete(deleteEntries, function(err, ret) {
+            if (!err) {
+
+                for (i in ret) {
+                    if (ret[i].code !== 200) {
+//                    console.log("[delete failed]" + ret[i].data)
+                    } else {
+                        console.log("[delete succeed]" + ret[i].data)
+                    }
+                }
+            } else {
+                console.log(err);
+            }
+        });
+    }
 
     // Perform puts
     var extra = new qiniu.io.PutExtra();

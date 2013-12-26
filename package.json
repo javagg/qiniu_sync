@@ -16,7 +16,8 @@
     "hashish": "*",
     "qiniu": "*",
     "wrench": "*",
-    "mkdirp": "*"
+    "mkdirp": "*",
+    "download": "*"
   },
   "keywords": [
     "qiniu"
